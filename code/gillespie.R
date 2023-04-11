@@ -65,17 +65,18 @@ gillespie <- function(states,parms,rates,maxits=1000){
 # Testing
 # =============================================================================
 
-# states <- c(S=999, I=1, R=0)
-# parms <- c(beta=2, gamma=1, N=sum(states))
-# rates <- c(
-# 	"S -> I"="beta*S*I/N", 
-# 	"I -> R"="gamma*I")
-# temp <- gillespie(states,parms,rates,maxits=10000)
+states <- c(S=999, I=1, R=0)
+parms <- c(beta=2, gamma=1, N=sum(states))
+rates <- c(
+	"S -> I"="beta*S*I/N", 
+	"I -> R"="gamma*I")
+temp <- gillespie(states,parms,rates,maxits=10000)
 
-# tempfig <- temp %>% 
-# 	ggplot(aes(x=t, y=I)) + 
-# 		geom_line() + 
-# 		theme_classic()
+tempfig <- temp %>% 
+	ggplot(aes(x=t, y=I)) + 
+		geom_line() + 
+		theme_classic()
+
 
 
 
