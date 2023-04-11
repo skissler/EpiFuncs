@@ -12,7 +12,7 @@ gillespie <- function(states,parms,rates,maxits=1000){
 	if(!setequal(
 		names(states),
 		unique(unlist(lapply(1:length(rates), function(x){get_from_to(rates,x)}))))){
-		stop("All compartments in rates must be defined with initial conditions in states")
+		stop("All compartments in rates must have initial conditions in states")
 	}
 
 	# Initialize looping index 
