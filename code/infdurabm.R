@@ -1,4 +1,6 @@
 library(tidyverse) 
+library(purrr)
+library(deSolve)
 
 # Bisection algorithm for a monotonically increasing function
 bisect <- function(target, lwr, upr, func, tol=1e-6){
@@ -21,16 +23,6 @@ bisect <- function(target, lwr, upr, func, tol=1e-6){
 	}
 
 	return(x)
-
-}
-
-# For evaluating the total kernel CDF: 
-cumckernel <- function(t, tinf, parslist, ckernel){
-
-	sum(unlist(pmap(
-		list(t-tinf[tinf<Inf], parslist[tinf<Inf]),
-		ckernel
-		)))
 
 }
 
@@ -78,7 +70,6 @@ plotfoi <- function(simout, pkernel, parslist){
 }
 
 # Plot a WAIFW tree: 
-
 
 
 # Plot individual infection kernels: 
@@ -134,6 +125,16 @@ plotA <- function(pkernel,parslist,tmax,tmin=0,compfun=NA){
 
 }
 
+# For evaluating the total kernel CDF: 
+cumckernel <- function(t, tinf, parslist, ckernel){
+
+	sum(unlist(pmap(
+		list(t-tinf[tinf<Inf], parslist[tinf<Inf]),
+		ckernel
+		)))
+
+}
+
 # Main simulation algorithm
 infdurabm <- function(pkernel, ckernel, parslist, invckernel=NA, initinf=1, initstep=1, maxits=1000, quiet=FALSE){
 
@@ -161,7 +162,7 @@ infdurabm <- function(pkernel, ckernel, parslist, invckernel=NA, initinf=1, init
 			
 		# Calculate the number of "events" that would occur in the current system given this rate: 
 		cumrate <- sum(tinf==Inf)*cumforce/N
-		if(cumrate < 1e-4){break()}
+		if(cumrate < 1e-6){break()}
 		nevents <- rpois(1,cumrate)
 
 		# Get the timing of those events: 
@@ -263,20 +264,90 @@ fig_A <- plotA(pkernel_sir, parslist, tmax=30, compfun=cf)
 
 beta <- 1/2
 gamma <- 1/5
-parslist <- as.list(rexp(200,gamma)) %>% 
-	map(~ c(tstar=., beta=beta))
 
 simoutlist <- list() 
-print(paste0("Loop started: ",Systime()))
-for(simnum in 1:500){
+print(paste0("Loop started: ",Sys.time()))
+for(simnum in 1:200){
+	parslist <- as.list(rexp(200,gamma)) %>% 
+		map(~ c(tstar=., beta=beta))
 	simout <- infdurabm(pkernel_sir, ckernel_sir, parslist, invckernel=NA, initinf=1, initstep=1, maxits=1000, quiet=TRUE)
 	simoutlist[[simnum]] <- simout
 	if(simnum%%10==0){
 		print(paste0("Simulation number ",simnum," completed"))
 	}
 }
-print(paste0("Loop ended: ",Systime()))
+print(paste0("Loop ended: ",Sys.time()))
 
+# save(simoutlist, file="~/Desktop/simoutlist.RData")
 
+simoutdf <- simoutlist %>% 
+	imap(~ mutate(.x, sim=.y)) %>% 
+	bind_rows() %>% 
+	filter(tinf<Inf) %>% 
+	mutate(counter=1) %>% 
+	group_by(sim) %>% 
+	arrange(sim, tinf) %>% 
+	group_by(sim) %>% 
+	mutate(cuminf=cumsum(counter)) %>% 
+	select(-counter) %>% 
+	split(.$sim) %>% 
+	map(~ bind_rows(., tibble(id=-1, tinf=Inf, whoinf=0, sim=min(.$sim), cuminf=last(.$cuminf)))) %>% 
+	bind_rows()
+
+sir <- function(t,state,parameters){
+	with(as.list(c(state,parameters)), {
+
+		dS <- -beta*I*S
+		dI <- beta*I*S - gamma*I
+		dR <- gamma*I
+
+		list(c(dS, dI, dR))
+
+		})
+}
+
+N <- length(parslist)
+parameters <- c(beta=beta, gamma=gamma) 
+state <- c(S=1-1/N, I=1/N, R=0)
+times <- seq(from=0, to=100, by=0.01)
+
+sirout <- ode(y = state, times = times, func = sir, parms = parameters) %>% 
+	data.frame() %>% 
+	as_tibble()
+
+figsimcurves <- simoutdf %>% 
+	ggplot() + 
+		geom_step(aes(x=tinf, y=cuminf, group=sim), col="grey", alpha=0.2) + 
+		geom_line(data=sirout, aes(x=time, y=R*N), col="blue", size=1) + 
+		theme_classic() 
+
+# Compare with a gillespie algorithm: 
+source('code/gillespie.R')
+
+states <- c(S=199, I=1, R=0)
+parms <- c(beta=1/2, gamma=1/5, N=sum(states))
+rates <- c(
+	"S -> I"="beta*S*I/N", 
+	"I -> R"="gamma*I")
+
+gilloutlist <- list()
+for(simnum in 1:200){
+	gillout <- gillespie(states,parms,rates,maxits=10000)
+	gilloutlist[[simnum]] <- gillout 
+	if(simnum%%10==0){
+		print(paste0("Simulation number ",simnum," completed"))
+	}	
+}
+
+gilloutdf <- gilloutlist %>% 
+	imap(~ mutate(.x, sim=.y)) %>% 
+	map(~ bind_rows(., tibble(t=Inf, sim=min(.$sim), S=last(.$S), I=last(.$I), R=last(.$R)))) %>% 
+	bind_rows()
+
+figgillcurves <- gilloutdf %>% 
+	ggplot() + 
+		geom_step(aes(x=t, y=R, group=sim), col="grey", alpha=0.2) + 
+		geom_line(data=sirout, aes(x=time, y=R*N), col="blue", size=1) + 
+		theme_classic() 
 
 
