@@ -161,9 +161,16 @@ infdurabm <- function(pkernel, ckernel, parslist, invckernel=NA, initinf=1, init
 		cumforce <- cumforceend - cumforcestart
 			
 		# Calculate the number of "events" that would occur in the current system given this rate: 
-		cumrate <- sum(tinf==Inf)*cumforce/N
-		if(cumrate < 1e-6){break()}
-		nevents <- rpois(1,cumrate)
+
+		pinf <- 1-exp(-cumforce/N)
+		if(sum(tinf==Inf)*pinf < 1e-6){break()}
+		nevents <- rbinom(1, sum(tinf==Inf), pinf)
+
+		# --------
+		# cumrate <- sum(tinf==Inf)*cumforce/N
+		# if(cumrate < 1e-6){break()}
+		# nevents <- rpois(1,cumrate)
+		# --------
 
 		# Get the timing of those events: 
 		if(nevents==0){
@@ -271,6 +278,10 @@ for(simnum in 1:200){
 	parslist <- as.list(rexp(200,gamma)) %>% 
 		map(~ c(tstar=., beta=beta))
 	simout <- infdurabm(pkernel_sir, ckernel_sir, parslist, invckernel=NA, initinf=1, initstep=1, maxits=1000, quiet=TRUE)
+	tstardf <- tibble(id=1:length(parslist), tstar=unlist(map(parslist,~.["tstar"])))
+	simout <- simout %>% 
+		left_join(tstardf, by="id") %>% 
+		mutate(trec=tinf+tstar)
 	simoutlist[[simnum]] <- simout
 	if(simnum%%10==0){
 		print(paste0("Simulation number ",simnum," completed"))
@@ -286,12 +297,12 @@ simoutdf <- simoutlist %>%
 	filter(tinf<Inf) %>% 
 	mutate(counter=1) %>% 
 	group_by(sim) %>% 
-	arrange(sim, tinf) %>% 
+	arrange(sim, trec) %>% 
 	group_by(sim) %>% 
 	mutate(cuminf=cumsum(counter)) %>% 
 	select(-counter) %>% 
 	split(.$sim) %>% 
-	map(~ bind_rows(., tibble(id=-1, tinf=Inf, whoinf=0, sim=min(.$sim), cuminf=last(.$cuminf)))) %>% 
+	map(~ bind_rows(., tibble(id=-1, tinf=Inf, whoinf=0, tstar=0, trec=Inf, sim=min(.$sim), cuminf=last(.$cuminf)))) %>% 
 	bind_rows()
 
 sir <- function(t,state,parameters){
@@ -317,7 +328,7 @@ sirout <- ode(y = state, times = times, func = sir, parms = parameters) %>%
 
 figsimcurves <- simoutdf %>% 
 	ggplot() + 
-		geom_step(aes(x=tinf, y=cuminf, group=sim), col="grey", alpha=0.2) + 
+		geom_step(aes(x=trec, y=cuminf, group=sim), col="grey", alpha=0.2) + 
 		geom_line(data=sirout, aes(x=time, y=R*N), col="blue", size=1) + 
 		theme_classic() 
 
@@ -325,7 +336,7 @@ figsimcurves <- simoutdf %>%
 source('code/gillespie.R')
 
 states <- c(S=199, I=1, R=0)
-parms <- c(beta=1/2, gamma=1/5, N=sum(states))
+parms <- c(beta=beta, gamma=gamma, N=sum(states))
 rates <- c(
 	"S -> I"="beta*S*I/N", 
 	"I -> R"="gamma*I")
