@@ -34,6 +34,106 @@ cumckernel <- function(t, tinf, parslist, ckernel){
 
 }
 
+# Time series of cumulative new infections: 
+plotcuminf <- function(simout){
+
+	N <- nrow(simout) 
+
+	simoutshort <- filter(simout, tinf<Inf)
+	tvals <- seq(from=0, to=max(simoutshort$tinf)+1, by=0.01)
+	tinf <- simoutshort$tinf
+	yvals <- unlist(lapply(tvals, function(x){sum(tinf<x)}))
+
+	out <- tibble(t=tvals, y=yvals) %>% 
+		ggplot(aes(x=t, y=y)) + 
+			geom_line(size=1) + 
+			geom_hline(yintercept=N, lty="dashed", col="grey") + 
+			theme_classic() + 
+			labs(x="Time", y="Cumulative infections")
+
+	return(out)
+
+}
+
+# Time series of the current force of infection: 
+plotfoi <- function(simout, pkernel, parslist){
+
+	simoutshort <- filter(simout, tinf<Inf)
+	tvals <- seq(from=0, to=max(simoutshort$tinf)+1, by=0.01)
+	tinf <- simoutshort$tinf
+	parslistshort <- parslist[simoutshort$id]
+
+	yvals <- as.list(tvals) %>% 
+		map(~ sum(unlist(pmap(list(.-tinf, parslistshort), pkernel)))) %>% 
+		unlist()
+
+	out <- tibble(t=tvals, y=yvals) %>% 
+		ggplot(aes(x=t, y=y)) + 
+			geom_line(size=1) + 
+			theme_classic() + 
+			labs(x="Time", y="Force of infection")
+
+	return(out)
+
+}
+
+# Plot a WAIFW tree: 
+
+
+
+# Plot individual infection kernels: 
+plotai <- function(pkernel,parslist,tmax,tmin=0,yjittersd=0.001){
+
+	tau <- seq(from=tmin, to=tmax, by=0.01)
+	out <- as.list(tau) %>% 
+		map(~ unlist(pmap(
+			list(rep(., length(parslist)), parslist),
+			pkernel
+			))) %>% 
+		map(~ tibble(id=1:length(.), y=.)) %>% 
+		imap(~ mutate(., tindex=.y)) %>% 
+		bind_rows() %>% 
+		left_join(tibble(tau=tau, tindex=1:length(tau)), by="tindex") %>% 
+		group_by(id) %>% 
+		mutate(yjitter=rnorm(1,0,yjittersd)) %>% 
+		ggplot(aes(x=tau, y=y+yjitter, group=factor(id))) + 
+			geom_line(alpha=0.2) + 
+			theme_classic() + 
+			labs(x="Time since infection", y="Infectiousness")
+
+	return(out)
+
+}
+
+
+# Plot the summed infection kernel across all individuals: 
+plotA <- function(pkernel,parslist,tmax,tmin=0,compfun=NA){
+
+	N <- length(parslist)
+	tau <- seq(from=tmin, to=tmax, by=0.01)
+	yvals <- as.list(tau) %>% 
+		map(~ sum(unlist(pmap(
+			list(rep(., length(parslist)), parslist),
+			pkernel
+			)))) %>% 
+		unlist()
+	out <- tibble(tau=tau, y=yvals/N) %>% 
+		ggplot(aes(x=tau, y=y)) + 
+			geom_line()  + 
+			theme_classic() + 
+			labs(x="Time since infection", y="Mean infectiousness")
+
+	if(is.function(compfun)){
+		ycomp <- unlist(lapply(tau, compfun))
+		out <- out + geom_line(
+			data=tibble(x=tau, y=ycomp), 
+			aes(x=x, y=y), size=1.5, col="dodgerblue", alpha=0.4)
+	}
+
+	return(out)
+
+}
+
 # Main simulation algorithm
 infdurabm <- function(pkernel, ckernel, parslist, invckernel=NA, initinf=1, initstep=1, maxits=1000){
 
@@ -96,9 +196,14 @@ infdurabm <- function(pkernel, ckernel, parslist, invckernel=NA, initinf=1, init
 		whoinf[newinf] <- newwhoinf
 
 		# Update variables for new loop: 
-		tstep <- tprop - t
 		t <- tprop
 
+	}
+
+	if(iteration >= maxits){
+		print(paste0("Reached maxits at time ",round(t,2)))
+	} else {
+		print(paste0("Epidemic ended at time ",round(t,2)," after ",iteration," iterations"))
 	}
 
 	out <- tibble(id=1:N, tinf=tinf, whoinf=whoinf)
@@ -106,7 +211,6 @@ infdurabm <- function(pkernel, ckernel, parslist, invckernel=NA, initinf=1, init
 	return(out)
 
 }
-
 
 # =============================================================================
 # Example
@@ -134,12 +238,17 @@ ckernel_sir <- function(tau,pars){
 		})
 }
 
-beta <- 2
+beta <- 1/2
 gamma <- 1/5
-parslist <- as.list(rexp(20,gamma)) %>% 
+parslist <- as.list(rexp(200,gamma)) %>% 
 	map(~ c(tstar=., beta=beta))
 
+simout <- infdurabm(pkernel_sir, ckernel_sir, parslist, invckernel=NA, initinf=1, initstep=1, maxits=1000)
 
+fig_cuminf <- plotcuminf(simout)
+fig_foi <- plotfoi(simout, pkernel_sir, parslist)
 
+fig_ai <- plotai(pkernel_sir, parslist, tmin=0.01, tmax=30)
 
-# simout <- infdurabm(pkernel_sir, ckernel_sir, parslist, invckernel=NA, initinf=1, initstep=1, maxits=1000)
+cf <- function(x){beta*exp(-gamma*x)}
+fig_A <- plotA(pkernel_sir, parslist, tmax=30, compfun=cf)
