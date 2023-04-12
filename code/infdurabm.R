@@ -135,7 +135,7 @@ plotA <- function(pkernel,parslist,tmax,tmin=0,compfun=NA){
 }
 
 # Main simulation algorithm
-infdurabm <- function(pkernel, ckernel, parslist, invckernel=NA, initinf=1, initstep=1, maxits=1000){
+infdurabm <- function(pkernel, ckernel, parslist, invckernel=NA, initinf=1, initstep=1, maxits=1000, quiet=FALSE){
 
 	# Initialize output vectors: 
 	N <- length(parslist)
@@ -200,10 +200,14 @@ infdurabm <- function(pkernel, ckernel, parslist, invckernel=NA, initinf=1, init
 
 	}
 
-	if(iteration >= maxits){
-		print(paste0("Reached maxits at time ",round(t,2)))
-	} else {
-		print(paste0("Epidemic ended at time ",round(t,2)," after ",iteration," iterations"))
+	if(!quiet){
+
+		if(iteration >= maxits){
+			print(paste0("Reached maxits at time ",round(t,2)))
+		} else {
+			print(paste0("Epidemic ended at time ",round(t,2)," after ",iteration," iterations"))
+		}
+
 	}
 
 	out <- tibble(id=1:N, tinf=tinf, whoinf=whoinf)
@@ -252,3 +256,27 @@ fig_ai <- plotai(pkernel_sir, parslist, tmin=0.01, tmax=30)
 
 cf <- function(x){beta*exp(-gamma*x)}
 fig_A <- plotA(pkernel_sir, parslist, tmax=30, compfun=cf)
+
+# =============================================================================
+# Repeated simulations 
+# =============================================================================
+
+beta <- 1/2
+gamma <- 1/5
+parslist <- as.list(rexp(200,gamma)) %>% 
+	map(~ c(tstar=., beta=beta))
+
+simoutlist <- list() 
+print(paste0("Loop started: ",Systime()))
+for(simnum in 1:500){
+	simout <- infdurabm(pkernel_sir, ckernel_sir, parslist, invckernel=NA, initinf=1, initstep=1, maxits=1000, quiet=TRUE)
+	simoutlist[[simnum]] <- simout
+	if(simnum%%10==0){
+		print(paste0("Simulation number ",simnum," completed"))
+	}
+}
+print(paste0("Loop ended: ",Systime()))
+
+
+
+
