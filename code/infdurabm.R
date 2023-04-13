@@ -1,6 +1,5 @@
 library(tidyverse) 
 library(purrr)
-library(deSolve)
 
 # Bisection algorithm for a monotonically increasing function
 bisect <- function(target, lwr, upr, func, tol=1e-6){
@@ -90,7 +89,8 @@ plotai <- function(pkernel,parslist,tmax,tmin=0,yjittersd=0.001){
 		ggplot(aes(x=tau, y=y+yjitter, group=factor(id))) + 
 			geom_line(alpha=0.2) + 
 			theme_classic() + 
-			labs(x="Time since infection", y="Infectiousness")
+			labs(x="Time since infection", y="Infectiousness") + 
+			theme(text=element_text(size=9))
 
 	return(out)
 
@@ -112,7 +112,8 @@ plotA <- function(pkernel,parslist,tmax,tmin=0,compfun=NA){
 		ggplot(aes(x=tau, y=y)) + 
 			geom_line()  + 
 			theme_classic() + 
-			labs(x="Time since infection", y="Mean infectiousness")
+			labs(x="Time since infection", y="Mean infectiousness") + 
+			theme(text=element_text(size=9))
 
 	if(is.function(compfun)){
 		ycomp <- unlist(lapply(tau, compfun))
@@ -161,7 +162,6 @@ infdurabm <- function(pkernel, ckernel, parslist, invckernel=NA, initinf=1, init
 		cumforce <- cumforceend - cumforcestart
 			
 		# Calculate the number of "events" that would occur in the current system given this rate: 
-
 		pinf <- 1-exp(-cumforce/N)
 		if(sum(tinf==Inf)*pinf < 1e-6){break()}
 		nevents <- rbinom(1, sum(tinf==Inf), pinf)
@@ -172,12 +172,13 @@ infdurabm <- function(pkernel, ckernel, parslist, invckernel=NA, initinf=1, init
 		# nevents <- rpois(1,cumrate)
 		# --------
 
-		# Get the timing of those events: 
+		# If nothing happened, proceed to the next iteration
 		if(nevents==0){
 			t <- tprop
 			next()
 		}
 
+		# If there were events, get their timing: 
 		# Get uniform draw for the inverse CDF
 		draw <- min(runif(nevents))
 
@@ -228,137 +229,39 @@ infdurabm <- function(pkernel, ckernel, parslist, invckernel=NA, initinf=1, init
 # Example
 # =============================================================================
 
-pkernel_sir <- function(tau,pars){
-	with(as.list(pars), {
-		if(tau>0 & tau<=tstar){
-			return(beta)
-		} else {
-			return(0)
-		}
-	})
-}
+# pkernel_sir <- function(tau,pars){
+# 	with(as.list(pars), {
+# 		if(tau>0 & tau<=tstar){
+# 			return(beta)
+# 		} else {
+# 			return(0)
+# 		}
+# 	})
+# }
 
-ckernel_sir <- function(tau,pars){
-	with(as.list(pars),{
-		if(tau<=0){
-			return(0)
-		} else if(tau>0 & tau<=tstar){
-			return(beta*tau)
-		} else {
-			return(beta*tstar)
-		}
-		})
-}
+# ckernel_sir <- function(tau,pars){
+# 	with(as.list(pars),{
+# 		if(tau<=0){
+# 			return(0)
+# 		} else if(tau>0 & tau<=tstar){
+# 			return(beta*tau)
+# 		} else {
+# 			return(beta*tstar)
+# 		}
+# 		})
+# }
 
-beta <- 1/2
-gamma <- 1/5
-parslist <- as.list(rexp(200,gamma)) %>% 
-	map(~ c(tstar=., beta=beta))
+# beta <- 1/2
+# gamma <- 1/5
+# parslist <- as.list(rexp(200,gamma)) %>% 
+# 	map(~ c(tstar=., beta=beta))
 
-simout <- infdurabm(pkernel_sir, ckernel_sir, parslist, invckernel=NA, initinf=1, initstep=1, maxits=1000)
+# simout <- infdurabm(pkernel_sir, ckernel_sir, parslist, invckernel=NA, initinf=1, initstep=1, maxits=1000)
 
-fig_cuminf <- plotcuminf(simout)
-fig_foi <- plotfoi(simout, pkernel_sir, parslist)
+# fig_cuminf <- plotcuminf(simout)
+# fig_foi <- plotfoi(simout, pkernel_sir, parslist)
 
-fig_ai <- plotai(pkernel_sir, parslist, tmin=0.01, tmax=30)
+# fig_ai <- plotai(pkernel_sir, parslist, tmin=0.01, tmax=30)
 
-cf <- function(x){beta*exp(-gamma*x)}
-fig_A <- plotA(pkernel_sir, parslist, tmax=30, compfun=cf)
-
-# =============================================================================
-# Repeated simulations 
-# =============================================================================
-
-beta <- 1/2
-gamma <- 1/5
-
-simoutlist <- list() 
-print(paste0("Loop started: ",Sys.time()))
-for(simnum in 1:200){
-	parslist <- as.list(rexp(200,gamma)) %>% 
-		map(~ c(tstar=., beta=beta))
-	simout <- infdurabm(pkernel_sir, ckernel_sir, parslist, invckernel=NA, initinf=1, initstep=1, maxits=1000, quiet=TRUE)
-	tstardf <- tibble(id=1:length(parslist), tstar=unlist(map(parslist,~.["tstar"])))
-	simout <- simout %>% 
-		left_join(tstardf, by="id") %>% 
-		mutate(trec=tinf+tstar)
-	simoutlist[[simnum]] <- simout
-	if(simnum%%10==0){
-		print(paste0("Simulation number ",simnum," completed"))
-	}
-}
-print(paste0("Loop ended: ",Sys.time()))
-
-# save(simoutlist, file="~/Desktop/simoutlist.RData")
-
-simoutdf <- simoutlist %>% 
-	imap(~ mutate(.x, sim=.y)) %>% 
-	bind_rows() %>% 
-	filter(tinf<Inf) %>% 
-	mutate(counter=1) %>% 
-	group_by(sim) %>% 
-	arrange(sim, trec) %>% 
-	group_by(sim) %>% 
-	mutate(cuminf=cumsum(counter)) %>% 
-	select(-counter) %>% 
-	split(.$sim) %>% 
-	map(~ bind_rows(., tibble(id=-1, tinf=Inf, whoinf=0, tstar=0, trec=Inf, sim=min(.$sim), cuminf=last(.$cuminf)))) %>% 
-	bind_rows()
-
-sir <- function(t,state,parameters){
-	with(as.list(c(state,parameters)), {
-
-		dS <- -beta*I*S
-		dI <- beta*I*S - gamma*I
-		dR <- gamma*I
-
-		list(c(dS, dI, dR))
-
-		})
-}
-
-N <- length(parslist)
-parameters <- c(beta=beta, gamma=gamma) 
-state <- c(S=1-1/N, I=1/N, R=0)
-times <- seq(from=0, to=100, by=0.01)
-
-sirout <- ode(y = state, times = times, func = sir, parms = parameters) %>% 
-	data.frame() %>% 
-	as_tibble()
-
-figsimcurves <- simoutdf %>% 
-	ggplot() + 
-		geom_step(aes(x=trec, y=cuminf, group=sim), col="grey", alpha=0.2) + 
-		geom_line(data=sirout, aes(x=time, y=R*N), col="blue", size=1) + 
-		theme_classic() 
-
-# Compare with a gillespie algorithm: 
-source('code/gillespie.R')
-
-states <- c(S=199, I=1, R=0)
-parms <- c(beta=beta, gamma=gamma, N=sum(states))
-rates <- c(
-	"S -> I"="beta*S*I/N", 
-	"I -> R"="gamma*I")
-
-gilloutlist <- list()
-for(simnum in 1:200){
-	gillout <- gillespie(states,parms,rates,maxits=10000)
-	gilloutlist[[simnum]] <- gillout 
-	if(simnum%%10==0){
-		print(paste0("Simulation number ",simnum," completed"))
-	}	
-}
-
-gilloutdf <- gilloutlist %>% 
-	imap(~ mutate(.x, sim=.y)) %>% 
-	map(~ bind_rows(., tibble(t=Inf, sim=min(.$sim), S=last(.$S), I=last(.$I), R=last(.$R)))) %>% 
-	bind_rows()
-
-figgillcurves <- gilloutdf %>% 
-	ggplot() + 
-		geom_step(aes(x=t, y=R, group=sim), col="grey", alpha=0.2) + 
-		geom_line(data=sirout, aes(x=time, y=R*N), col="blue", size=1) + 
-		theme_classic() 
-
-
+# cf <- function(x){beta*exp(-gamma*x)}
+# fig_A <- plotA(pkernel_sir, parslist, tmax=30, compfun=cf)
